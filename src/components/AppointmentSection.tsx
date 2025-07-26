@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,13 +11,22 @@ import {
   Mail, 
   MapPin, 
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Settings
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import emailjs from '@emailjs/browser';
 import consultationImage from '@/assets/consultation.jpg';
 
 const AppointmentSection = () => {
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailConfig, setEmailConfig] = useState({
+    serviceId: '',
+    templateId: '',
+    publicKey: ''
+  });
+  const [showEmailSetup, setShowEmailSetup] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -54,7 +63,20 @@ const AppointmentSection = () => {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Load saved EmailJS configuration on component mount
+  useEffect(() => {
+    const saved = localStorage.getItem('emailjs_config');
+    if (saved) {
+      try {
+        const config = JSON.parse(saved);
+        setEmailConfig(config);
+      } catch (error) {
+        console.error('Failed to parse saved EmailJS config:', error);
+      }
+    }
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Basic validation
@@ -67,24 +89,71 @@ const AppointmentSection = () => {
       return;
     }
 
-    // Simulate appointment booking
-    toast({
-      title: "Appointment Booked Successfully!",
-      description: "We'll contact you shortly to confirm your appointment details.",
-    });
+    // Check if EmailJS is configured
+    if (!emailConfig.serviceId || !emailConfig.templateId || !emailConfig.publicKey) {
+      toast({
+        title: "Email Service Not Configured",
+        description: "Please configure EmailJS settings first to send appointment requests.",
+        variant: "destructive",
+      });
+      setShowEmailSetup(true);
+      return;
+    }
 
-    // Reset form
-    setFormData({
-      firstName: '',
-      lastName: '',
-      email: '',
-      phone: '',
-      department: '',
-      doctor: '',
-      date: '',
-      time: '',
-      message: ''
-    });
+    setIsLoading(true);
+
+    try {
+      // Prepare email template parameters
+      const templateParams = {
+        to_email: 'appointments@healthcareplus.com', // Clinic's email
+        from_name: `${formData.firstName} ${formData.lastName}`,
+        from_email: formData.email,
+        phone: formData.phone,
+        department: formData.department || 'Any Department',
+        preferred_doctor: formData.doctor || 'Any Available Doctor',
+        preferred_date: formData.date,
+        preferred_time: formData.time || 'Any Available Time',
+        message: formData.message || 'No additional message provided',
+        subject: `New Appointment Request from ${formData.firstName} ${formData.lastName}`,
+        reply_to: formData.email
+      };
+
+      // Send email using EmailJS
+      await emailjs.send(
+        emailConfig.serviceId,
+        emailConfig.templateId,
+        templateParams,
+        emailConfig.publicKey
+      );
+
+      toast({
+        title: "Appointment Request Sent Successfully!",
+        description: "We've received your appointment request and will contact you within 24 hours to confirm the details.",
+      });
+
+      // Reset form
+      setFormData({
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        department: '',
+        doctor: '',
+        date: '',
+        time: '',
+        message: ''
+      });
+
+    } catch (error) {
+      console.error('EmailJS Error:', error);
+      toast({
+        title: "Failed to Send Request",
+        description: "There was an error sending your appointment request. Please try again or call us directly.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -110,15 +179,114 @@ const AppointmentSection = () => {
         </div>
 
         <div className="grid lg:grid-cols-2 gap-16 items-start">
+          {/* EmailJS Configuration Panel */}
+          {showEmailSetup && (
+            <div className="lg:col-span-2 mb-8">
+              <div className="glass-card p-6 border-l-4 border-accent">
+                <h3 className="text-xl font-bold text-primary mb-4 flex items-center">
+                  <Settings className="w-5 h-5 mr-2 text-accent" />
+                  EmailJS Configuration Required
+                </h3>
+                <p className="text-muted-foreground mb-4">
+                  To send appointment emails, please configure your EmailJS settings. 
+                  This is a one-time setup that will be saved in your browser.
+                </p>
+                
+                <div className="grid md:grid-cols-3 gap-4 mb-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="serviceId">Service ID</Label>
+                    <Input
+                      id="serviceId"
+                      value={emailConfig.serviceId}
+                      onChange={(e) => setEmailConfig({...emailConfig, serviceId: e.target.value})}
+                      className="glass-card border-glass-border/30"
+                      placeholder="service_xxxxxxx"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="templateId">Template ID</Label>
+                    <Input
+                      id="templateId"
+                      value={emailConfig.templateId}
+                      onChange={(e) => setEmailConfig({...emailConfig, templateId: e.target.value})}
+                      className="glass-card border-glass-border/30"
+                      placeholder="template_xxxxxxx"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="publicKey">Public Key</Label>
+                    <Input
+                      id="publicKey"
+                      value={emailConfig.publicKey}
+                      onChange={(e) => setEmailConfig({...emailConfig, publicKey: e.target.value})}
+                      className="glass-card border-glass-border/30"
+                      placeholder="your_public_key"
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex space-x-3">
+                  <Button 
+                    onClick={() => {
+                      localStorage.setItem('emailjs_config', JSON.stringify(emailConfig));
+                      setShowEmailSetup(false);
+                      toast({
+                        title: "Configuration Saved",
+                        description: "EmailJS settings have been saved. You can now send appointment requests.",
+                      });
+                    }}
+                    className="glass-button-accent"
+                  >
+                    Save Configuration
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    onClick={() => setShowEmailSetup(false)}
+                    className="glass-card-hover border-primary/30"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                
+                <div className="mt-4 p-4 bg-secondary/10 rounded-lg">
+                  <h4 className="font-semibold text-secondary mb-2">How to get these values:</h4>
+                  <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+                    <li>Sign up for free at <a href="https://emailjs.com" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">emailjs.com</a></li>
+                    <li>Create an email service (Gmail, Outlook, etc.)</li>
+                    <li>Create an email template with the appointment details</li>
+                    <li>Copy the Service ID, Template ID, and Public Key here</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Left - Appointment Form */}
           <div className="glass-card p-8">
-            <div className="mb-8">
-              <h3 className="text-2xl font-bold text-primary mb-2">
-                Book Your Appointment
-              </h3>
-              <p className="text-muted-foreground">
-                Fill out the form below and we'll get back to you within 24 hours.
-              </p>
+            <div className="mb-6 flex justify-between items-center">
+              <div>
+                <h3 className="text-2xl font-bold text-primary mb-2">
+                  Book Your Appointment
+                </h3>
+                <p className="text-muted-foreground">
+                  Fill out the form below and we'll get back to you within 24 hours.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const saved = localStorage.getItem('emailjs_config');
+                  if (saved) {
+                    setEmailConfig(JSON.parse(saved));
+                  }
+                  setShowEmailSetup(true);
+                }}
+                className="glass-card-hover border-secondary/30"
+              >
+                <Settings className="w-4 h-4 mr-2 text-secondary" />
+                Email Setup
+              </Button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -260,9 +428,22 @@ const AppointmentSection = () => {
               </div>
 
               {/* Submit Button */}
-              <Button type="submit" className="w-full glass-button-accent py-3">
-                <Calendar className="w-5 h-5 mr-2" />
-                Book Appointment
+              <Button 
+                type="submit" 
+                className="w-full glass-button-accent py-3"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-5 h-5 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Sending Request...
+                  </>
+                ) : (
+                  <>
+                    <Calendar className="w-5 h-5 mr-2" />
+                    Send Appointment Request
+                  </>
+                )}
               </Button>
             </form>
           </div>
